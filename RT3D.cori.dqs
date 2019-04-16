@@ -1,0 +1,268 @@
+#!/bin/ksh
+#SBATCH --job-name=3DRT-PBCs
+#SBATCH --constraint=knl,quad,cache
+#SBATCH --nodes=1
+#SBATCH --tasks-per-node=64
+#SBATCH --cpus-per-task=4
+#SBATCH --core-spec=4
+#SBATCH --time=0-00:30:00
+#SBATCH --partition=debug
+#SBATCH --account=m1814
+#SBATCH --export=NONE
+#SBATCH --exclusive
+#SBATCH --mail-type=end
+#SBATCH --mail-user=peter.hauschildt@uni-hamburg.de
+set -x
+source /etc/ksh.kshrc
+###module load craype-hugepages8M
+#cd $PBS_O_WORKDIR
+
+lscpu
+
+export CODE_ARCH=X86_64-INTEL-F95-V17-MPI-SMP-HDF-KNL
+
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+export PROCS=$SLURM_NTASKS
+
+export OMP_PROC_BIND=spread
+export OMP_PLACES=threads
+
+export PHOENIX=~/phxexp/BIN/$CODE_ARCH/3DRT/main
+
+JOBNAME=RT3D.PBC.zmap.standard.NoWideLstar.cori.${CODE_ARCH}.MPI=${PROCS}.SMP=${OMP_NUM_THREADS}
+JOBNAME=RT3D.PBC.zmap.MultiPass.NoWideLstar.cori.${CODE_ARCH}.MPI=${PROCS}.SMP=${OMP_NUM_THREADS}
+
+
+RESTART="NULL"
+export JOB_NAME=$$
+export INITIALDIR=`pwd`
+
+####export TMPDIR=/global/homes/h/hauschil/tmp
+
+mkdir -p $TMPDIR/$JOB_NAME
+cd $TMPDIR/$JOB_NAME
+
+cat >fort.5 <<ENDE 
+&s3main
+
+ c="input for s3main RT test code",
+ 
+ c='what shall we do today?',
+ c='0: quadrature test',
+ c='1: not used',
+ c='2: pointer test',
+ c='3: use SC solver'
+ c='4: use LC solver'
+ c='5: test Lstar from SC_Lstar_solver'
+ c='6: test Lstar from LC_Lstar_solver'
+ c='7: lambda iterations with SC_solver'
+ c='8: lambda iterations with LC_solver'
+ c='9: OS iterations with SC_solver'
+ c='10: OS iterations with LC_solver'
+ c='11: call RT3D with SC_solver'
+ c='12: call RT3D with LC_solver'
+ c='13: call 2lvl solver with SC_solver'
+ c='14: call 2lvl solver with LC_solver'
+ c='15: call RT2D with SC_solver'
+ c='16: call RT2D with LC_solver'
+ c='17: test 2D Lstar with SC_solver (not implemented)'
+ c='18: test 2D Lstar with LC_solver'
+ c='19: call FS2D with SC_solver  (not implemented)'
+ c='20: call FS2D with LC_solver'
+ c='21: call FS3D with SC_solver'
+ c='22: call FS3D with LC_solver'
+
+
+ job = 12,
+ ! job = 6,
+ save_intensities = f,
+ read_pve_data = '$RESTART',
+ read_line_pve_data = '$RESTART',
+ save_Lstar = f,
+ x_pbc = t, y_pbc=t,
+ n_step_max = 4, c='max. number of steps per z-cell for PBC wraparound limiter',
+ use_zmap = t,
+ verbose_RT3D = t,
+ use_binary_files = t,
+
+ use_Bezier = f,
+ use_Lstar_redo = f,          ! true to turn automatic Lstar recomputation for Bezier spline if PBM changes significantly
+ backtrack_limit = 3,
+
+ wide_Lstar = f,
+ use_Vector=f,  
+ use_OpenACC=f,  
+ use_MultiPass = t,
+ use_tracking_cache = f,
+
+ use_radial_grid=t,
+ use_mu = t,
+
+ c='number of angle points in phi and theta:',
+  n_phi   = 32,
+  n_theta = 16,
+
+ c='size of the PVE grid:'
+  nx = 32,
+  ny = 32,
+  nz = 128,
+
+ c='size of the PVE grid:'
+ ! nx = 8,
+ ! ny = 8,
+ ! nz = 32,
+
+c='size of the Lstar:' 
+  nnlx = 1,
+  nnly = 1,
+  nnlz = 1,
+
+ c='center of the sphere is at:',
+ ix_center = 0,
+ iy_center = 0,
+ iz_center = 0,
+
+ c='location to test Lstar at:',
+ ix_test =  0,
+ iy_test =  0,
+ iz_test =  -32,
+
+
+ c='location to test Lstar at:',
+ ! ix_test =  666,
+ ! iy_test =  666,
+ ! iz_test =  666,
+
+
+ c='use ng acceleration?',
+  use_ng = t,
+  nng = 4,
+
+ c='0: Diagonal, 1: Rapido, 2: Lapack, 3: SuperLU, 4: Jordan, 5: Gauss-Seidel',
+   OS_Solver=4,
+   Jordan_mpi=t,
+
+ c='solid angle quadrature: true for MC, false for trapez',
+   MC_int = t,
+
+ c='parameters for the Rapido Solver:',
+   sigma_Rap=8,
+   max_iter_Rap=1000,
+   max_error_Rap=1d-10,
+
+ didl_discr_meth = 0.5d0, 
+
+ c='which velocity field to use?',
+ c='1=homology 2=wind 3=damped sin wave',
+ c='4=shockwave 1 5=shockwave 6=shockwave3 7=100 zone shockwave',
+ c='8=undamped sine wave',
+ ivel_field=1,
+
+ c="the prefix of the names for the output files:"
+ jobname = '$JOBNAME',
+
+ c="location and prefix for NMS3 filenames!",
+ prefix = '$NMS3TMPDIR/NMS3',
+
+ 
+ c="number of lambda iterations:",
+      itlamb = 30,
+
+c="max. number of iterations in accit:",
+      itacc = 30,
+ 
+c=" bandwidth of the alo:",
+      lwdth = 5
+ 
+c=" accuracy parameter:",
+      epsacc = 1d-6
+
+c=" linear interplation threshold below tau=taulin:",
+      taulin = 1.d300,
+      taulin = 1.d-2,
+
+c=" if leading S increases more than X times the local point, use linear",
+      PPM_max_step = 100.d0
+
+ 
+c=" parameter for planeparallel rt:",
+      nmue = 4
+ 
+c=" parameters of the test grid",
+      nkos = 2.d0
+      vmax = 0.d3
+      ivelstop = 2 
+      vexp = 0.0d0
+      tmin = 1.d-4
+      tmax = 1.0d8,rmax = 1.01d13, rmin = 1.d13,
+      eps = 1.d-2
+ 
+c=" parameter for temperature correction:",
+      tsw = 1.d-0
+      iul = 0
+      idamp = 0
+      reacc = 1.d-3
+      icorr = 6
+      ittmax = 200
+ 
+c=" parameter for core intersecting rays:",
+      ngauss = 15
+      ncore = 15
+      rcin = 1d-2
+      rcout = 0.99
+
+c=" parameter for additional rays:",
+      nadd = 0
+      nbis = 2
+      nvon = 25
+ 
+c=" lambda's for continuum",
+      wavel = -1.d0
+      wlkm1 = 900.d0
+      wlk1 = 901.d0
+      dwl = 0.d0
+ 
+c=" line parameter",
+      strlin = 1.d+2
+      wlline = 1000.d0
+      width = .001d0
+      wdhstp = 0.0025d0
+      wdhstp_out = 5.0d-2
+      epslin = 1.d-2
+      npkt = 1000
+ 
+c="  euler system",
+      gowdth = 0.25d0
+      gom = 50
+      gop = 50
+ 
+c=" energy parameter",
+      hok = 1d5
+      teff = 1.d4
+ 
+c=" temperature polynomial:",
+      tpoly(0) = 1d4
+      tpoly(1) = 0.d+0
+      tpoly(2) = 0.d3
+      grey_T = t,
+/
+ENDE
+
+\cp $PHOENIX ./main
+
+\rm -rf $INITIALDIR/$JOBNAME
+
+#time ./main > fort.6.0000000
+#gdb-ia ./main
+
+time srun  -n ${PROCS}  -c ${OMP_NUM_THREADS} --cpu_bind=cores ./main
+
+mkdir -p $INITIALDIR/$JOBNAME
+\cp fort* $INITIALDIR/$JOBNAME
+#\cp loop* $INITIALDIR/$JOBNAME
+#\cp *.stf* $INITIALDIR/$JOBNAME
+#\cp *ipm* $INITIALDIR/$JOBNAME
+#\cp ${JOBNAME}* $INITIALDIR/$JOBNAME
+
+cd
+\rm -r $TMPDIR/$JOB_NAME
